@@ -10,8 +10,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
@@ -36,10 +41,20 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContent {
-            MaterialTheme {
+            val themeMode by viewModel.themeMode.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val isDark = when (themeMode) {
+                ThemeMode.SYSTEM -> systemDark
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            val colorScheme = if (isDark) darkColorScheme() else lightColorScheme()
+
+            MaterialTheme(colorScheme = colorScheme) {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     MainScreen(
                         viewModel = viewModel,
+                        isDarkTheme = isDark,
                         onRequestPermissionsAndScan = { autoConnect ->
                             pendingAutoConnect = autoConnect
                             checkPermissionsAndScan()

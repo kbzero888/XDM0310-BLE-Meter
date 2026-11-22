@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,17 +27,20 @@ import java.util.Locale
 @Composable
 fun MainScreen(
     viewModel: MainViewModel,
+    isDarkTheme: Boolean,
     onRequestPermissionsAndScan: (Boolean) -> Unit
 ) {
     val connectionState by viewModel.bleManager.connectionState.collectAsState()
     val connectedDeviceName by viewModel.bleManager.connectedDeviceName.collectAsState()
     val scannedDevices by viewModel.bleManager.scannedDevices.collectAsState()
 
+    val themeMode by viewModel.themeMode.collectAsState()
     val isSerialPage by viewModel.isSerialPage.collectAsState()
     val isPollingEnabled by viewModel.isPollingEnabled.collectAsState()
     val targetAddress by viewModel.targetAddress.collectAsState()
     val autoRecordEnabled by viewModel.autoRecordEnabled.collectAsState()
     val stableThreshold by viewModel.stableThreshold.collectAsState()
+    val jumpThresholdMilliohms by viewModel.jumpThresholdMilliohms.collectAsState()
     val stableProgress by viewModel.stableProgress.collectAsState()
     val currentReading by viewModel.currentReading.collectAsState()
     val savedRecords by viewModel.savedRecords.collectAsState()
@@ -53,7 +58,9 @@ fun MainScreen(
                         Text(
                             text = if (isSerialPage) "蓝牙串口助手" else "XDM0310 内阻仪",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Text(
                             text = when (connectionState) {
@@ -63,6 +70,8 @@ fun MainScreen(
                                 BleConnectionState.DISCONNECTED -> "未连接蓝牙设备"
                             },
                             style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             color = if (connectionState == BleConnectionState.CONNECTED) {
                                 MaterialTheme.colorScheme.primary
                             } else {
@@ -72,6 +81,17 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    // 三态主题切换按钮（跟随系统 / 亮色 / 暗色）
+                    IconButton(onClick = { viewModel.cycleThemeMode() }) {
+                        Icon(
+                            imageVector = when (themeMode) {
+                                ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
+                                ThemeMode.LIGHT -> Icons.Default.LightMode
+                                ThemeMode.DARK -> Icons.Default.DarkMode
+                            },
+                            contentDescription = "切换主题(${themeMode.label})"
+                        )
+                    }
                     // 导出 CSV 按钮
                     IconButton(onClick = { viewModel.exportCsvAndShare() }) {
                         Icon(Icons.Default.Share, contentDescription = "导出 CSV")
@@ -94,8 +114,8 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // 顶部公共控制栏：蓝牙连接 + 轮询启停按钮 + 目标地址选择
             ControlHeaderBar(
@@ -117,6 +137,7 @@ fun MainScreen(
                     serialLogs = serialLogs,
                     currentReading = currentReading,
                     targetAddress = targetAddress,
+                    isDarkTheme = isDarkTheme,
                     onSendHex = { hex, appendSum -> viewModel.sendCustomHex(hex, appendSum) },
                     onClearLogs = { viewModel.clearSerialLogs() },
                     modifier = Modifier.weight(1f)
@@ -127,10 +148,12 @@ fun MainScreen(
                     targetAddress = targetAddress,
                     autoRecordEnabled = autoRecordEnabled,
                     stableThreshold = stableThreshold,
+                    jumpThresholdMilliohms = jumpThresholdMilliohms,
                     stableProgress = stableProgress,
                     savedRecords = savedRecords,
                     onToggleAutoRecord = { viewModel.setAutoRecordEnabled(it) },
                     onThresholdChange = { viewModel.setStableThreshold(it) },
+                    onJumpThresholdChange = { viewModel.setJumpThresholdMilliohms(it) },
                     onManualSave = { viewModel.manualSaveCurrentReading() },
                     onEditNote = { editingNoteRecord = it },
                     onDeleteRecord = { viewModel.deleteRecord(it) },
@@ -232,40 +255,39 @@ private fun ControlHeaderBar(
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(10.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // 蓝牙连接按钮组（精简文案 + 单行不折行，留足右侧空间）
             if (connectionState == BleConnectionState.DISCONNECTED) {
                 Button(
                     onClick = onAutoScanClick,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
                 ) {
-                    Icon(Icons.Default.BluetoothSearching, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Icon(Icons.Default.BluetoothSearching, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("自动", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(
                     onClick = onManualSelectClick,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
                 ) {
                     Text("列表", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
             } else {
                 OutlinedButton(
                     onClick = onDisconnectClick,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
                 ) {
-                    Icon(Icons.Default.BluetoothDisabled, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Icon(Icons.Default.BluetoothDisabled, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("断开", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
@@ -273,7 +295,6 @@ private fun ControlHeaderBar(
 
             Spacer(Modifier.weight(1f))
 
-            // 轮询启停按钮
             FilledTonalButton(
                 onClick = onTogglePolling,
                 colors = ButtonDefaults.filledTonalButtonColors(
@@ -283,13 +304,13 @@ private fun ControlHeaderBar(
                         MaterialTheme.colorScheme.errorContainer
                     }
                 ),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.height(34.dp)
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                modifier = Modifier.height(32.dp)
             ) {
                 Icon(
                     imageVector = if (isPollingEnabled) Icons.Default.Sync else Icons.Default.SyncDisabled,
                     contentDescription = null,
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(14.dp)
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
@@ -301,11 +322,10 @@ private fun ControlHeaderBar(
                 )
             }
 
-            // 目标地址选择按钮（纯文字“地址”，禁止换行裁切）
             OutlinedButton(
                 onClick = onOpenAddressSelector,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                modifier = Modifier.height(34.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                modifier = Modifier.height(32.dp)
             ) {
                 Text(
                     text = "地址",
@@ -325,26 +345,38 @@ private fun DashboardPage(
     targetAddress: Int,
     autoRecordEnabled: Boolean,
     stableThreshold: Int,
+    jumpThresholdMilliohms: Double,
     stableProgress: Int,
     savedRecords: List<SavedRecord>,
     onToggleAutoRecord: (Boolean) -> Unit,
     onThresholdChange: (Int) -> Unit,
+    onJumpThresholdChange: (Double) -> Unit,
     onManualSave: () -> Unit,
     onEditNote: (SavedRecord) -> Unit,
     onDeleteRecord: (Long) -> Unit,
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var thresholdInputText by remember(jumpThresholdMilliohms) {
+        mutableStateOf(
+            if (jumpThresholdMilliohms % 1.0 == 0.0) {
+                jumpThresholdMilliohms.toInt().toString()
+            } else {
+                jumpThresholdMilliohms.toString()
+            }
+        )
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // 主测量仪表盘卡片
+        // 主测量仪表盘卡片（紧凑版内边距，留足下方记录空间）
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(14.dp)
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -353,26 +385,27 @@ private fun DashboardPage(
                     Text(
                         text = String.format(Locale.US, "目标地址 0x%02X", targetAddress),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "供电: ${currentReading?.supplyVoltageText ?: "--"}  电量: ${currentReading?.batteryPercentText ?: "--"}",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(4.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("内阻 (IR)", style = MaterialTheme.typography.labelMedium)
+                        Text("内阻 (IR)", style = MaterialTheme.typography.labelSmall)
                         Text(
                             text = currentReading?.resistanceText ?: "---- mΩ",
-                            fontSize = 30.sp,
+                            fontSize = 27.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
                             color = if (currentReading?.isOverload == true) {
@@ -383,10 +416,10 @@ private fun DashboardPage(
                         )
                     }
                     Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                        Text("电压 (VOLT)", style = MaterialTheme.typography.labelMedium)
+                        Text("电压 (VOLT)", style = MaterialTheme.typography.labelSmall)
                         Text(
                             text = currentReading?.voltageText ?: "---- V",
-                            fontSize = 30.sp,
+                            fontSize = 27.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.primary
@@ -396,51 +429,129 @@ private fun DashboardPage(
             }
         }
 
-        // 防抖自动记录控制卡
+        // 防抖自动记录 + 自定义相邻帧突变阈值控制卡（紧凑布局）
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Column(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { onToggleAutoRecord(!autoRecordEnabled) }
+                    ) {
                         Checkbox(
                             checked = autoRecordEnabled,
-                            onCheckedChange = onToggleAutoRecord
+                            onCheckedChange = onToggleAutoRecord,
+                            modifier = Modifier.size(30.dp)
                         )
-                        Text("稳定自动保存 ($stableProgress/$stableThreshold 帧)", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "自动保存 ($stableProgress/$stableThreshold 帧)",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                     FilledTonalButton(
                         onClick = onManualSave,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("手动记一条", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(2.dp))
+                        Text("手动记一条", fontSize = 11.sp, maxLines = 1, softWrap = false)
                     }
                 }
 
                 if (autoRecordEnabled) {
+                    // 第一行：防抖帧数选择条
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(28.dp)
+                            .padding(horizontal = 4.dp)
                     ) {
                         Text("防抖帧数:", style = MaterialTheme.typography.labelSmall)
                         Slider(
                             value = stableThreshold.toFloat(),
                             onValueChange = { onThresholdChange(it.toInt()) },
-                            valueRange = 1f..15f,
-                            steps = 13,
+                            valueRange = 1f..12f,
+                            steps = 10,
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(horizontal = 8.dp)
                         )
-                        Text("${stableThreshold}帧", style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            text = "${stableThreshold}帧",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // 第二行：紧贴防抖帧数下方的相邻帧突变阈值设置窗口
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "突变阈值:",
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        OutlinedTextField(
+                            value = thresholdInputText,
+                            onValueChange = { raw ->
+                                thresholdInputText = raw
+                                raw.toDoubleOrNull()?.let { parsed ->
+                                    if (parsed > 0.0) {
+                                        onJumpThresholdChange(parsed)
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            suffix = { Text("mΩ", fontSize = 10.sp) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            textStyle = LocalTextStyle.current.copy(
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        )
+
+                        // 常用阈值快捷切换胶囊（50mΩ / 200mΩ / 1000mΩ=1Ω）
+                        listOf(50.0 to "50", 200.0 to "200", 1000.0 to "1Ω").forEach { (valMohm, label) ->
+                            val selected = kotlin.math.abs(jumpThresholdMilliohms - valMohm) < 0.001
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    onJumpThresholdChange(valMohm)
+                                    thresholdInputText = valMohm.toInt().toString()
+                                },
+                                label = {
+                                    Text(
+                                        text = label,
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                modifier = Modifier.height(28.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -448,47 +559,53 @@ private fun DashboardPage(
 
         // 历史记录标题栏
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "已保存记录 (${savedRecords.size} 条)",
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold
             )
             if (savedRecords.isNotEmpty()) {
-                TextButton(onClick = onClearAll) {
-                    Text("清空全部", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                TextButton(
+                    onClick = onClearAll,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier = Modifier.height(24.dp)
+                ) {
+                    Text("清空全部", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
                 }
             }
         }
 
-        // 历史记录列表
+        // 紧凑型历史记录列表（节省垂直空间，同屏可展示更多条目）
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(savedRecords, key = { it.id }) { record ->
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "${record.voltage}  |  ${record.resistance}",
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text(
                                     text = "[0x${record.addressHex}]",
                                     style = MaterialTheme.typography.labelSmall,
@@ -503,11 +620,11 @@ private fun DashboardPage(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        IconButton(onClick = { onEditNote(record) }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Edit, contentDescription = "备注", modifier = Modifier.size(16.dp))
+                        IconButton(onClick = { onEditNote(record) }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Edit, contentDescription = "备注", modifier = Modifier.size(15.dp))
                         }
-                        IconButton(onClick = { onDeleteRecord(record.id) }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(16.dp))
+                        IconButton(onClick = { onDeleteRecord(record.id) }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(15.dp))
                         }
                     }
                 }
@@ -521,6 +638,7 @@ private fun SerialMonitorPage(
     serialLogs: List<SerialLogEntry>,
     currentReading: MeterReading?,
     targetAddress: Int,
+    isDarkTheme: Boolean,
     onSendHex: (String, Boolean) -> Boolean,
     onClearLogs: () -> Unit,
     modifier: Modifier = Modifier
@@ -530,7 +648,18 @@ private fun SerialMonitorPage(
     var autoScroll by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(serialLogs.size, autoScroll) {
+    // 根据当前亮/暗色主题动态适配 HEX 报文监视器配色
+    val monitorBgColor = if (isDarkTheme) Color(0xFF14171A) else Color(0xFFF1F5F9)
+    val monitorHeaderColor = if (isDarkTheme) Color(0xFF1F2429) else Color(0xFFE2E8F0)
+    val monitorTitleColor = if (isDarkTheme) Color(0xFFE0E0E0) else Color(0xFF1E293B)
+    val txTextColor = if (isDarkTheme) Color(0xFF64B5F6) else Color(0xFF1565C0)
+    val rxTextColor = if (isDarkTheme) Color(0xFFA5D6A7) else Color(0xFF2E7D32)
+    val autoScrollToggleColor = if (isDarkTheme) Color(0xFF81C784) else Color(0xFF1B5E20)
+    val clearBtnColor = if (isDarkTheme) Color(0xFFE57373) else Color(0xFFC62828)
+
+    // 监听最新一条日志的唯一 ID（而不是 size），满 150 条后依然能持续自动滚屏
+    val latestLogId = serialLogs.lastOrNull()?.id
+    LaunchedEffect(latestLogId, autoScroll) {
         if (autoScroll && serialLogs.isNotEmpty()) {
             listState.scrollToItem(serialLogs.lastIndex)
         }
@@ -540,9 +669,9 @@ private fun SerialMonitorPage(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 上半部分：内阻仪返回的 16 进制消息监视区
+        // 上半部分：内阻仪返回的 16 进制消息监视区（自动适配亮暗色主题）
         Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF14171A)),
+            colors = CardDefaults.cardColors(containerColor = monitorBgColor),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -552,14 +681,14 @@ private fun SerialMonitorPage(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF1F2429))
+                        .background(monitorHeaderColor)
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "HEX 报文监视 (${serialLogs.size})",
-                        color = Color(0xFFE0E0E0),
+                        text = "HEX 报文监视 (${serialLogs.size}/150)",
+                        color = monitorTitleColor,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -572,7 +701,7 @@ private fun SerialMonitorPage(
                             Text(
                                 text = if (autoScroll) "自动滚屏:开" else "自动滚屏:关",
                                 fontSize = 11.sp,
-                                color = Color(0xFF81C784)
+                                color = autoScrollToggleColor
                             )
                         }
                         TextButton(
@@ -580,7 +709,7 @@ private fun SerialMonitorPage(
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                             modifier = Modifier.height(28.dp)
                         ) {
-                            Text("清屏", fontSize = 11.sp, color = Color(0xFFE57373))
+                            Text("清屏", fontSize = 11.sp, color = clearBtnColor)
                         }
                     }
                 }
@@ -595,7 +724,7 @@ private fun SerialMonitorPage(
                     items(serialLogs, key = { it.id }) { log ->
                         Text(
                             text = "[${log.timeText}] ${if (log.isTx) "TX >" else "RX <"} ${log.hexText}",
-                            color = if (log.isTx) Color(0xFF64B5F6) else Color(0xFFA5D6A7),
+                            color = if (log.isTx) txTextColor else rxTextColor,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             lineHeight = 15.sp
@@ -612,7 +741,6 @@ private fun SerialMonitorPage(
                 .weight(0.42f),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 下半部分左侧：编辑与发送 16 进制消息
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                 shape = RoundedCornerShape(12.dp),
@@ -662,7 +790,6 @@ private fun SerialMonitorPage(
                             )
                         }
 
-                        // 小巧协调的“发送”按钮，单行禁止截断
                         Button(
                             onClick = { onSendHex(hexInput, appendChecksum) },
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
@@ -679,7 +806,6 @@ private fun SerialMonitorPage(
                 }
             }
 
-            // 下半部分右侧：同步显示实时电压与内阻数值
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)

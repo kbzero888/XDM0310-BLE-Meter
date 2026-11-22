@@ -5,6 +5,7 @@ import java.util.Locale
 data class MeterReading(
     val moduleAddress: Int,
     val resistanceText: String,
+    val resistanceMilliohms: Double, // 统一换算为毫欧(mΩ)的纯数值，用于相邻帧差值稳定判定
     val isOverload: Boolean,
     val voltageText: String,
     val supplyVoltageText: String,
@@ -56,14 +57,33 @@ object BleProtocol {
         val resRange = bytes[4].toInt() and 0xFF
         val resRaw = ((bytes[5].toInt() and 0xFF) shl 8) or (bytes[6].toInt() and 0xFF)
 
-        val resistanceText = if (!isValidResistance) {
-            "oL"
+        val resistanceText: String
+        val resistanceMilliohms: Double
+
+        if (!isValidResistance) {
+            resistanceText = "oL"
+            resistanceMilliohms = Double.NaN
         } else {
             when (resRange) {
-                0 -> String.format(Locale.US, "%.2fΩ", resRaw / 100.0)
-                1 -> String.format(Locale.US, "%.2fmΩ", resRaw / 10.0)
-                2 -> String.format(Locale.US, "%.2fmΩ", resRaw / 100.0)
-                else -> "0.00mΩ"
+                0 -> {
+                    val ohms = resRaw / 100.0
+                    resistanceText = String.format(Locale.US, "%.2fΩ", ohms)
+                    resistanceMilliohms = ohms * 1000.0
+                }
+                1 -> {
+                    val mohms = resRaw / 10.0
+                    resistanceText = String.format(Locale.US, "%.2fmΩ", mohms)
+                    resistanceMilliohms = mohms
+                }
+                2 -> {
+                    val mohms = resRaw / 100.0
+                    resistanceText = String.format(Locale.US, "%.2fmΩ", mohms)
+                    resistanceMilliohms = mohms
+                }
+                else -> {
+                    resistanceText = "0.00mΩ"
+                    resistanceMilliohms = 0.0
+                }
             }
         }
 
@@ -89,6 +109,7 @@ object BleProtocol {
         return MeterReading(
             moduleAddress = moduleAddress,
             resistanceText = resistanceText,
+            resistanceMilliohms = resistanceMilliohms,
             isOverload = !isValidResistance,
             voltageText = voltageText,
             supplyVoltageText = supplyVoltageText,

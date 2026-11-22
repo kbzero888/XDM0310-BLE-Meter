@@ -1,6 +1,7 @@
 package com.xdm0310.meter
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.core.content.FileProvider
@@ -16,6 +17,19 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
+
+enum class ThemeMode(val label: String) {
+    SYSTEM("跟随系统"),
+    LIGHT("亮色主题"),
+    DARK("暗色主题");
+
+    fun next(): ThemeMode = when (this) {
+        SYSTEM -> LIGHT
+        LIGHT -> DARK
+        DARK -> SYSTEM
+    }
+}
 
 data class SavedRecord(
     val id: Long,
@@ -35,13 +49,24 @@ data class SerialLogEntry(
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
+    companion object {
+        private const val MAX_SERIAL_LOGS = 150
+    }
+
     val bleManager = XdmBleManager(application)
+    private val prefs = application.getSharedPreferences("xdm0310_prefs", Context.MODE_PRIVATE)
+
+    // 主题模式（跟随系统 / 亮色 / 暗色）
+    private val _themeMode = MutableStateFlow(
+        ThemeMode.entries.getOrElse(prefs.getInt("theme_mode", 0)) { ThemeMode.SYSTEM }
+    )
+    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
     // 页面模式：false = 仪表盘视图，true = 蓝牙串口助手视图
     private val _isSerialPage = MutableStateFlow(false)
     val isSerialPage: StateFlow<Boolean> = _isSerialPage.asStateFlow()
 
-    // 轮询控制开关（默认开启，用户可随时点击按钮启停）
+    // 轮询控制开关
     private val _isPollingEnabled = MutableStateFlow(true)
     val isPollingEnabled: StateFlow<Boolean> = _isPollingEnabled.asStateFlow()
 
@@ -49,12 +74,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _targetAddress = MutableStateFlow(1)
     val targetAddress: StateFlow<Int> = _targetAddress.asStateFlow()
 
-    // 自动记录开关 & 稳定帧数阈值（默认连续 8 帧相同才锁定记录）
+    // 自动记录开关 & 稳定帧数阈值（默认 4 帧，滑块 1~12 帧）
     private val _autoRecordEnabled = MutableStateFlow(true)
     val autoRecordEnabled: StateFlow<Boolean> = _autoRecordEnabled.asStateFlow()
 
-    private val _stableThreshold = MutableStateFlow(8)
+    private val _stableThreshold = MutableStateFlow(
+        prefs.getInt("stable_threshold", 4).coerceIn(1, 12)
+    )
     val stableThreshold: StateFlow<Int> = _stableThreshold.asStateFlow()
+
+    // 相邻两帧突变复位阈值（单位：毫欧 mΩ，默认 1000 mΩ = 1 Ω）
+    private val _jumpThresholdMilliohms = MutableStateFlow(
+        prefs.getFloat("jump_threshold_mohm", 1000f).toDouble().coerceAtLeast(0.01)
+    )
+    val jumpThresholdMilliohms: StateFlow<Double> = _jumpThresholdMilliohms.asStateFlow()
 
     private val _stableProgress = MutableStateFlow(0)
     val stableProgress: StateFlow<Int> = _stableProgress.asStateFlow()
@@ -67,19 +100,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _savedRecords = MutableStateFlow<List<SavedRecord>>(emptyList())
     val savedRecords: StateFlow<List<SavedRecord>> = _savedRecords.asStateFlow()
 
-    // 串口助手日志列表
+    // 串口助手日志列表（仅在串口页面激活时记录，配合 100ms 节流刷新防卡顿）
     private val _serialLogs = MutableStateFlow<List<SerialLogEntry>>(emptyList())
     val serialLogs: StateFlow<List<SerialLogEntry>> = _serialLogs.asStateFlow()
 
-    // 防抖与单次连续测量会话状态
-    private var lastResistanceText = ""
+    // 相邻帧防抖与单次测量会话状态
+    private var previousFrameMilliohms: Double? = null
     private var consecutiveSameCount = 0
-    private var hasCommittedCurrentStability = false
-    // 当前未断开（未出现 oL）的测量会话所对应的记录 ID；为 null 表示下一次稳定需新增记录
     private var activeSessionRecordId: Long? = null
 
     // 拆包重组缓冲区
     private val rxBuffer = mutableListOf<Byte>()
+
+    // 串口日志内存队列与节流脏标记
+    private val serialLogBuffer = ArrayDeque<SerialLogEntry>(MAX_SERIAL_LOGS + 8)
+    private var serialLogsDirty = false
     private var logSequence = 0L
 
     private val storageFile = File(application.filesDir, "xdm0310_records.tsv")
@@ -90,10 +125,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadRecordsFromDisk()
         startIncomingDataCollector()
         startPollingLoop()
+        startSerialLogUiSyncLoop()
+    }
+
+    fun cycleThemeMode() {
+        val next = _themeMode.value.next()
+        _themeMode.value = next
+        prefs.edit().putInt("theme_mode", next.ordinal).apply()
+        Toast.makeText(getApplication(), "已切换为：${next.label}", Toast.LENGTH_SHORT).show()
     }
 
     fun togglePage() {
-        _isSerialPage.value = !_isSerialPage.value
+        val nextIsSerial = !_isSerialPage.value
+        _isSerialPage.value = nextIsSerial
+        if (nextIsSerial) {
+            // 刚切入串口页面时立即同步一次当前列表，避免任何延迟或堆积
+            synchronized(serialLogBuffer) {
+                _serialLogs.value = serialLogBuffer.toList()
+                serialLogsDirty = false
+            }
+        }
     }
 
     fun togglePolling() {
@@ -112,14 +163,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setStableThreshold(count: Int) {
-        _stableThreshold.value = count.coerceIn(1, 20)
+        val clamped = count.coerceIn(1, 12)
+        _stableThreshold.value = clamped
+        prefs.edit().putInt("stable_threshold", clamped).apply()
         resetMeasurementSession()
     }
 
+    fun setJumpThresholdMilliohms(milliohms: Double) {
+        val valid = milliohms.coerceIn(0.01, 1_000_000.0)
+        _jumpThresholdMilliohms.value = valid
+        prefs.edit().putFloat("jump_threshold_mohm", valid.toFloat()).apply()
+    }
+
     private fun resetMeasurementSession() {
-        lastResistanceText = ""
+        previousFrameMilliohms = null
         consecutiveSameCount = 0
-        hasCommittedCurrentStability = false
         activeSessionRecordId = null
         _stableProgress.value = 0
     }
@@ -132,6 +190,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     sendRawBytes(cmd)
                 }
                 delay(250L)
+            }
+        }
+    }
+
+    /**
+     * 每 100ms 将内存中的串口日志增量批量同步到 Compose UI，避免高频收发重绘拖垮主线程
+     */
+    private fun startSerialLogUiSyncLoop() {
+        viewModelScope.launch {
+            while (isActive) {
+                if (_isSerialPage.value && serialLogsDirty) {
+                    val snapshot = synchronized(serialLogBuffer) {
+                        serialLogsDirty = false
+                        serialLogBuffer.toList()
+                    }
+                    _serialLogs.value = snapshot
+                }
+                delay(100L)
             }
         }
     }
@@ -169,37 +245,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         if (!_autoRecordEnabled.value) return
 
-        // 表笔离开（检测到 oL 超量程）：结束当前测量会话，下一次有效稳定读数将追加新记录
-        if (reading.isOverload) {
+        // 检测到表笔断开（oL 超量程）：结束当前测量会话，下一次有效测量将新增记录
+        if (reading.isOverload || reading.resistanceMilliohms.isNaN()) {
             resetMeasurementSession()
             return
         }
 
-        if (reading.resistanceText == lastResistanceText) {
-            consecutiveSameCount++
-            _stableProgress.value = consecutiveSameCount.coerceAtMost(_stableThreshold.value)
-            if (consecutiveSameCount >= _stableThreshold.value && !hasCommittedCurrentStability) {
-                hasCommittedCurrentStability = true
-                commitSessionReading(reading)
-            }
-        } else {
-            // 表笔未断开（未出现 oL）的情况下读数发生变化：重新累计稳定帧数，但保留 activeSessionRecordId
-            lastResistanceText = reading.resistanceText
+        val prevMohm = previousFrameMilliohms
+        val currentMohm = reading.resistanceMilliohms
+        val jumpLimit = _jumpThresholdMilliohms.value
+
+        if (prevMohm == null) {
+            // 刚接触电池的第一帧有效读数
+            previousFrameMilliohms = currentMohm
             consecutiveSameCount = 1
-            hasCommittedCurrentStability = false
-            _stableProgress.value = 1
-            if (_stableThreshold.value == 1) {
-                hasCommittedCurrentStability = true
-                commitSessionReading(reading)
+        } else {
+            val delta = abs(currentMohm - prevMohm)
+            if (delta < jumpLimit) {
+                // 相邻两帧未出现超过阈值的突变 -> 判定为稳定帧，继续累加
+                consecutiveSameCount++
+            } else {
+                // 相邻两帧出现巨大差异 -> 判定为不稳定帧，重新计数（但保留同一会话 ID）
+                consecutiveSameCount = 1
             }
+            previousFrameMilliohms = currentMohm
+        }
+
+        val threshold = _stableThreshold.value
+        _stableProgress.value = consecutiveSameCount.coerceAtMost(threshold)
+
+        // 一旦达到稳定帧数，在未断开期间持续同步更新当前这一条测量记录（首次则新建，后续稳定帧原地覆盖）
+        if (consecutiveSameCount >= threshold) {
+            commitSessionReading(reading)
         }
     }
 
-    /**
-     * 同一次连续测量中：
-     * - 若 activeSessionRecordId 为空（首次接触或刚从 oL 恢复），追加一条新记录；
-     * - 若 activeSessionRecordId 仍有效（表笔未断开期间阻值漂移并重新稳定），直接覆盖更新原记录。
-     */
     private fun commitSessionReading(reading: MeterReading) {
         val existingId = activeSessionRecordId
         val newTime = timeFormatter.format(Date(reading.timestamp))
@@ -375,6 +455,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun appendSerialLog(isTx: Boolean, bytes: ByteArray) {
+        // 仅在串口助手页面激活时记录 HEX 报文，防止在仪表盘主页长期挂机时后台堆积卡顿
+        if (!_isSerialPage.value) return
+
         logSequence++
         val entry = SerialLogEntry(
             id = logSequence,
@@ -382,12 +465,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isTx = isTx,
             hexText = BleProtocol.bytesToHex(bytes)
         )
-        val current = _serialLogs.value
-        val trimmed = if (current.size >= 300) current.drop(current.size - 299) else current
-        _serialLogs.value = trimmed + entry
+        synchronized(serialLogBuffer) {
+            if (serialLogBuffer.size >= MAX_SERIAL_LOGS) {
+                serialLogBuffer.removeFirst()
+            }
+            serialLogBuffer.addLast(entry)
+            serialLogsDirty = true
+        }
     }
 
     fun clearSerialLogs() {
+        synchronized(serialLogBuffer) {
+            serialLogBuffer.clear()
+            serialLogsDirty = false
+        }
         _serialLogs.value = emptyList()
     }
 
