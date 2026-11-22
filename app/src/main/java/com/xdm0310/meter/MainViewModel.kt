@@ -71,10 +71,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _serialLogs = MutableStateFlow<List<SerialLogEntry>>(emptyList())
     val serialLogs: StateFlow<List<SerialLogEntry>> = _serialLogs.asStateFlow()
 
-    // 防抖内部状态
+    // 防抖与单次连续测量会话状态
     private var lastResistanceText = ""
     private var consecutiveSameCount = 0
-    private var hasRecordedCurrentHold = false
+    private var hasCommittedCurrentStability = false
+    // 当前未断开（未出现 oL）的测量会话所对应的记录 ID；为 null 表示下一次稳定需新增记录
+    private var activeSessionRecordId: Long? = null
 
     // 拆包重组缓冲区
     private val rxBuffer = mutableListOf<Byte>()
@@ -101,23 +103,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setTargetAddress(address: Int) {
         val clamped = address.coerceIn(1, 254)
         _targetAddress.value = clamped
-        resetStabilityCounter()
+        resetMeasurementSession()
     }
 
     fun setAutoRecordEnabled(enabled: Boolean) {
         _autoRecordEnabled.value = enabled
-        resetStabilityCounter()
+        resetMeasurementSession()
     }
 
     fun setStableThreshold(count: Int) {
         _stableThreshold.value = count.coerceIn(1, 20)
-        resetStabilityCounter()
+        resetMeasurementSession()
     }
 
-    private fun resetStabilityCounter() {
+    private fun resetMeasurementSession() {
         lastResistanceText = ""
         consecutiveSameCount = 0
-        hasRecordedCurrentHold = false
+        hasCommittedCurrentStability = false
+        activeSessionRecordId = null
         _stableProgress.value = 0
     }
 
@@ -138,7 +141,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             bleManager.incomingBytes.collect { chunk ->
                 appendSerialLog(isTx = false, bytes = chunk)
 
-                // 写入缓冲区并按 16 字节帧解析
                 for (b in chunk) {
                     rxBuffer.add(b)
                 }
@@ -149,7 +151,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         repeat(16) { rxBuffer.removeAt(0) }
                         handleParsedFrame(parsed)
                     } else {
-                        // 帧头/校验不匹配时滑窗丢弃 1 字节重新对齐
                         rxBuffer.removeAt(0)
                     }
                 }
@@ -168,27 +169,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         if (!_autoRecordEnabled.value) return
 
+        // 表笔离开（检测到 oL 超量程）：结束当前测量会话，下一次有效稳定读数将追加新记录
         if (reading.isOverload) {
-            resetStabilityCounter()
+            resetMeasurementSession()
             return
         }
 
         if (reading.resistanceText == lastResistanceText) {
             consecutiveSameCount++
             _stableProgress.value = consecutiveSameCount.coerceAtMost(_stableThreshold.value)
-            if (consecutiveSameCount >= _stableThreshold.value && !hasRecordedCurrentHold) {
-                hasRecordedCurrentHold = true
-                addRecord(reading)
+            if (consecutiveSameCount >= _stableThreshold.value && !hasCommittedCurrentStability) {
+                hasCommittedCurrentStability = true
+                commitSessionReading(reading)
             }
         } else {
+            // 表笔未断开（未出现 oL）的情况下读数发生变化：重新累计稳定帧数，但保留 activeSessionRecordId
             lastResistanceText = reading.resistanceText
             consecutiveSameCount = 1
-            hasRecordedCurrentHold = false
+            hasCommittedCurrentStability = false
             _stableProgress.value = 1
             if (_stableThreshold.value == 1) {
-                hasRecordedCurrentHold = true
-                addRecord(reading)
+                hasCommittedCurrentStability = true
+                commitSessionReading(reading)
             }
+        }
+    }
+
+    /**
+     * 同一次连续测量中：
+     * - 若 activeSessionRecordId 为空（首次接触或刚从 oL 恢复），追加一条新记录；
+     * - 若 activeSessionRecordId 仍有效（表笔未断开期间阻值漂移并重新稳定），直接覆盖更新原记录。
+     */
+    private fun commitSessionReading(reading: MeterReading) {
+        val existingId = activeSessionRecordId
+        val newTime = timeFormatter.format(Date(reading.timestamp))
+        val newAddr = String.format(Locale.US, "%02X", reading.moduleAddress)
+
+        if (existingId != null && _savedRecords.value.any { it.id == existingId }) {
+            val updated = _savedRecords.value.map { item ->
+                if (item.id == existingId) {
+                    item.copy(
+                        timeText = newTime,
+                        addressHex = newAddr,
+                        voltage = reading.voltageText,
+                        resistance = reading.resistanceText
+                    )
+                } else {
+                    item
+                }
+            }
+            _savedRecords.value = updated
+            persistRecordsToDisk(updated)
+        } else {
+            val newId = System.nanoTime()
+            activeSessionRecordId = newId
+            val record = SavedRecord(
+                id = newId,
+                timeText = newTime,
+                addressHex = newAddr,
+                voltage = reading.voltageText,
+                resistance = reading.resistanceText,
+                note = ""
+            )
+            val updated = listOf(record) + _savedRecords.value
+            _savedRecords.value = updated
+            persistRecordsToDisk(updated)
         }
     }
 
@@ -198,22 +243,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Toast.makeText(getApplication(), "当前无有效测量读数", Toast.LENGTH_SHORT).show()
             return
         }
-        addRecord(current)
-        Toast.makeText(getApplication(), "已手动记录一组数据", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun addRecord(reading: MeterReading) {
+        val newId = System.nanoTime()
+        activeSessionRecordId = newId
         val record = SavedRecord(
-            id = System.nanoTime(),
-            timeText = timeFormatter.format(Date(reading.timestamp)),
-            addressHex = String.format(Locale.US, "%02X", reading.moduleAddress),
-            voltage = reading.voltageText,
-            resistance = reading.resistanceText,
+            id = newId,
+            timeText = timeFormatter.format(Date(current.timestamp)),
+            addressHex = String.format(Locale.US, "%02X", current.moduleAddress),
+            voltage = current.voltageText,
+            resistance = current.resistanceText,
             note = ""
         )
         val updated = listOf(record) + _savedRecords.value
         _savedRecords.value = updated
         persistRecordsToDisk(updated)
+        Toast.makeText(getApplication(), "已手动记录一组数据", Toast.LENGTH_SHORT).show()
     }
 
     fun updateRecordNote(id: Long, newNote: String) {
@@ -225,12 +268,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteRecord(id: Long) {
+        if (activeSessionRecordId == id) {
+            activeSessionRecordId = null
+        }
         val updated = _savedRecords.value.filterNot { it.id == id }
         _savedRecords.value = updated
         persistRecordsToDisk(updated)
     }
 
     fun clearAllRecords() {
+        activeSessionRecordId = null
         _savedRecords.value = emptyList()
         persistRecordsToDisk(emptyList())
     }

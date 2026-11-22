@@ -88,7 +88,7 @@ class XdmBleManager(context: Context) {
             }
             _scannedDevices.value = currentList
 
-            // 自动连接首个匹配 FFE0 服务的设备（与原版行为一致）
+            // 自动连接首个匹配 FFE0 服务的设备
             if (autoConnectFirstFfe0) {
                 autoConnectFirstFfe0 = false
                 stopScan()
@@ -152,7 +152,6 @@ class XdmBleManager(context: Context) {
             }
         }
 
-        // Android 13+ 回调
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -163,7 +162,6 @@ class XdmBleManager(context: Context) {
             }
         }
 
-        // Android 12 及以下回调
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,

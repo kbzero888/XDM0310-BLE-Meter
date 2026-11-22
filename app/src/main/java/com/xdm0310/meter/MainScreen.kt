@@ -101,7 +101,6 @@ fun MainScreen(
             ControlHeaderBar(
                 connectionState = connectionState,
                 isPollingEnabled = isPollingEnabled,
-                targetAddress = targetAddress,
                 onAutoScanClick = { onRequestPermissionsAndScan(true) },
                 onManualSelectClick = {
                     onRequestPermissionsAndScan(false)
@@ -225,7 +224,6 @@ fun MainScreen(
 private fun ControlHeaderBar(
     connectionState: BleConnectionState,
     isPollingEnabled: Boolean,
-    targetAddress: Int,
     onAutoScanClick: () -> Unit,
     onManualSelectClick: () -> Unit,
     onDisconnectClick: () -> Unit,
@@ -239,37 +237,37 @@ private fun ControlHeaderBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // 蓝牙连接按钮组
+            // 蓝牙连接按钮组（精简文案 + 单行不折行，留足右侧空间）
             if (connectionState == BleConnectionState.DISCONNECTED) {
                 Button(
                     onClick = onAutoScanClick,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
                 ) {
-                    Icon(Icons.Default.BluetoothSearching, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.BluetoothSearching, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("自动连接", fontSize = 12.sp)
+                    Text("自动", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(
                     onClick = onManualSelectClick,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
                 ) {
-                    Text("列表", fontSize = 12.sp)
+                    Text("列表", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
             } else {
                 OutlinedButton(
                     onClick = onDisconnectClick,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
                 ) {
-                    Icon(Icons.Default.BluetoothDisabled, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.BluetoothDisabled, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("断开", fontSize = 12.sp)
+                    Text("断开", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
             }
 
@@ -285,33 +283,36 @@ private fun ControlHeaderBar(
                         MaterialTheme.colorScheme.errorContainer
                     }
                 ),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                modifier = Modifier.height(36.dp)
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(34.dp)
             ) {
                 Icon(
                     imageVector = if (isPollingEnabled) Icons.Default.Sync else Icons.Default.SyncDisabled,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
                     text = if (isPollingEnabled) "轮询中" else "已暂停",
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
-            // 目标地址选择按钮
+            // 目标地址选择按钮（纯文字“地址”，禁止换行裁切）
             OutlinedButton(
                 onClick = onOpenAddressSelector,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                modifier = Modifier.height(36.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(34.dp)
             ) {
                 Text(
-                    text = String.format(Locale.US, "地址:%02X", targetAddress),
+                    text = "地址",
                     fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
@@ -420,7 +421,7 @@ private fun DashboardPage(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("手动记一条", fontSize = 12.sp)
+                        Text("手动记一条", fontSize = 12.sp, maxLines = 1, softWrap = false)
                     }
                 }
 
@@ -622,13 +623,13 @@ private fun SerialMonitorPage(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     OutlinedTextField(
                         value = hexInput,
                         onValueChange = { hexInput = it },
-                        label = { Text("发送 HEX 指令", fontSize = 12.sp) },
+                        label = { Text("发送 HEX 指令", fontSize = 11.sp) },
                         textStyle = LocalTextStyle.current.copy(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp
@@ -650,19 +651,29 @@ private fun SerialMonitorPage(
                             Checkbox(
                                 checked = appendChecksum,
                                 onCheckedChange = { appendChecksum = it },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(26.dp)
                             )
-                            Text("自动校验和", fontSize = 11.sp)
+                            Spacer(Modifier.width(2.dp))
+                            Text(
+                                text = "自动校验和",
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
 
+                        // 小巧协调的“发送”按钮，单行禁止截断
                         Button(
                             onClick = { onSendHex(hexInput, appendChecksum) },
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                            modifier = Modifier.height(36.dp)
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
                         ) {
-                            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("发送", fontSize = 12.sp)
+                            Text(
+                                text = "发送",
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
