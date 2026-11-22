@@ -2,11 +2,13 @@ package com.xdm0310.meter
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,8 +17,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,9 +53,20 @@ fun MainScreen(
 
     var showDeviceDialog by remember { mutableStateOf(false) }
     var showAddressDialog by remember { mutableStateOf(false) }
+    var showThemeMenu by remember { mutableStateOf(false) }
     var editingNoteRecord by remember { mutableStateOf<SavedRecord?>(null) }
 
+    val focusManager = LocalFocusManager.current
+
     Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            // 点击界面任意空白处自动清除输入框焦点并收起软键盘
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    focusManager.clearFocus()
+                })
+            },
         topBar = {
             TopAppBar(
                 title = {
@@ -81,24 +97,74 @@ fun MainScreen(
                     }
                 },
                 actions = {
-                    // 三态主题切换按钮（跟随系统 / 亮色 / 暗色）
-                    IconButton(onClick = { viewModel.cycleThemeMode() }) {
-                        Icon(
-                            imageVector = when (themeMode) {
-                                ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
-                                ThemeMode.LIGHT -> Icons.Default.LightMode
-                                ThemeMode.DARK -> Icons.Default.DarkMode
-                            },
-                            contentDescription = "切换主题(${themeMode.label})"
-                        )
+                    // 主题选择菜单（直接点选：跟随系统 / 亮色主题 / 暗色主题）
+                    Box {
+                        IconButton(onClick = {
+                            focusManager.clearFocus()
+                            showThemeMenu = true
+                        }) {
+                            Icon(
+                                imageVector = when (themeMode) {
+                                    ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
+                                    ThemeMode.LIGHT -> Icons.Default.LightMode
+                                    ThemeMode.DARK -> Icons.Default.DarkMode
+                                },
+                                contentDescription = "选择主题"
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showThemeMenu,
+                            onDismissRequest = { showThemeMenu = false }
+                        ) {
+                            ThemeMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = mode.label,
+                                            fontWeight = if (themeMode == mode) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = when (mode) {
+                                                ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
+                                                ThemeMode.LIGHT -> Icons.Default.LightMode
+                                                ThemeMode.DARK -> Icons.Default.DarkMode
+                                            },
+                                            contentDescription = null
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (themeMode == mode) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "已选中",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        viewModel.setThemeMode(mode)
+                                        showThemeMenu = false
+                                    }
+                                )
+                            }
+                        }
                     }
+
                     // 导出 CSV 按钮
-                    IconButton(onClick = { viewModel.exportCsvAndShare() }) {
+                    IconButton(onClick = {
+                        focusManager.clearFocus()
+                        viewModel.exportCsvAndShare()
+                    }) {
                         Icon(Icons.Default.Share, contentDescription = "导出 CSV")
                     }
                     // 切换主界面 / 蓝牙串口助手按钮
                     FilledTonalIconButton(
-                        onClick = { viewModel.togglePage() },
+                        onClick = {
+                            focusManager.clearFocus()
+                            viewModel.togglePage()
+                        },
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
                         Icon(
@@ -121,14 +187,27 @@ fun MainScreen(
             ControlHeaderBar(
                 connectionState = connectionState,
                 isPollingEnabled = isPollingEnabled,
-                onAutoScanClick = { onRequestPermissionsAndScan(true) },
+                onAutoScanClick = {
+                    focusManager.clearFocus()
+                    onRequestPermissionsAndScan(true)
+                },
                 onManualSelectClick = {
+                    focusManager.clearFocus()
                     onRequestPermissionsAndScan(false)
                     showDeviceDialog = true
                 },
-                onDisconnectClick = { viewModel.bleManager.disconnect() },
-                onTogglePolling = { viewModel.togglePolling() },
-                onOpenAddressSelector = { showAddressDialog = true }
+                onDisconnectClick = {
+                    focusManager.clearFocus()
+                    viewModel.bleManager.disconnect()
+                },
+                onTogglePolling = {
+                    focusManager.clearFocus()
+                    viewModel.togglePolling()
+                },
+                onOpenAddressSelector = {
+                    focusManager.clearFocus()
+                    showAddressDialog = true
+                }
             )
 
             // 页面主体切换
@@ -218,6 +297,7 @@ fun MainScreen(
     // 记录备注编辑弹窗
     editingNoteRecord?.let { record ->
         var noteText by remember(record) { mutableStateOf(record.note) }
+        val dialogFocusManager = LocalFocusManager.current
         AlertDialog(
             onDismissRequest = { editingNoteRecord = null },
             title = { Text("编辑电池备注") },
@@ -227,6 +307,8 @@ fun MainScreen(
                     onValueChange = { noteText = it },
                     label = { Text("例如：1号电芯 / 组A-03") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { dialogFocusManager.clearFocus() }),
                     modifier = Modifier.fillMaxWidth()
                 )
             },
@@ -357,6 +439,9 @@ private fun DashboardPage(
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val focusManager = LocalFocusManager.current
+    var showPresetMenu by remember { mutableStateOf(false) }
+
     var thresholdInputText by remember(jumpThresholdMilliohms) {
         mutableStateOf(
             if (jumpThresholdMilliohms % 1.0 == 0.0) {
@@ -367,11 +452,20 @@ private fun DashboardPage(
         )
     }
 
+    val thresholdPresets = listOf(
+        10.0 to "10 mΩ (高精稳定)",
+        50.0 to "50 mΩ (常规电芯)",
+        100.0 to "100 mΩ",
+        200.0 to "200 mΩ",
+        500.0 to "500 mΩ (0.5 Ω)",
+        1000.0 to "1000 mΩ (1.0 Ω 默认)"
+    )
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // 主测量仪表盘卡片（紧凑版内边距，留足下方记录空间）
+        // 主测量仪表盘卡片
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
             shape = RoundedCornerShape(14.dp)
@@ -429,7 +523,7 @@ private fun DashboardPage(
             }
         }
 
-        // 防抖自动记录 + 自定义相邻帧突变阈值控制卡（紧凑布局）
+        // 防抖自动记录 + 自定义相邻帧突变阈值控制卡
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             shape = RoundedCornerShape(12.dp)
@@ -445,11 +539,17 @@ private fun DashboardPage(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { onToggleAutoRecord(!autoRecordEnabled) }
+                        modifier = Modifier.clickable {
+                            focusManager.clearFocus()
+                            onToggleAutoRecord(!autoRecordEnabled)
+                        }
                     ) {
                         Checkbox(
                             checked = autoRecordEnabled,
-                            onCheckedChange = onToggleAutoRecord,
+                            onCheckedChange = {
+                                focusManager.clearFocus()
+                                onToggleAutoRecord(it)
+                            },
                             modifier = Modifier.size(30.dp)
                         )
                         Spacer(Modifier.width(4.dp))
@@ -460,7 +560,10 @@ private fun DashboardPage(
                         )
                     }
                     FilledTonalButton(
-                        onClick = onManualSave,
+                        onClick = {
+                            focusManager.clearFocus()
+                            onManualSave()
+                        },
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
@@ -482,7 +585,10 @@ private fun DashboardPage(
                         Text("防抖帧数:", style = MaterialTheme.typography.labelSmall)
                         Slider(
                             value = stableThreshold.toFloat(),
-                            onValueChange = { onThresholdChange(it.toInt()) },
+                            onValueChange = {
+                                focusManager.clearFocus()
+                                onThresholdChange(it.toInt())
+                            },
                             valueRange = 1f..12f,
                             steps = 10,
                             modifier = Modifier
@@ -496,10 +602,10 @@ private fun DashboardPage(
                         )
                     }
 
-                    // 第二行：紧贴防抖帧数下方的相邻帧突变阈值设置窗口
+                    // 第二行：宽敞的突变阈值输入框 + “预设”下拉菜单按钮
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 2.dp)
@@ -521,36 +627,77 @@ private fun DashboardPage(
                                 }
                             },
                             singleLine = true,
-                            suffix = { Text("mΩ", fontSize = 10.sp) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            suffix = { Text("mΩ", fontSize = 11.sp) },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Decimal,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = { focusManager.clearFocus() }
+                            ),
                             textStyle = LocalTextStyle.current.copy(
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontFamily = FontFamily.Monospace
                             ),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                         )
 
-                        // 常用阈值快捷切换胶囊（50mΩ / 200mΩ / 1000mΩ=1Ω）
-                        listOf(50.0 to "50", 200.0 to "200", 1000.0 to "1Ω").forEach { (valMohm, label) ->
-                            val selected = kotlin.math.abs(jumpThresholdMilliohms - valMohm) < 0.001
-                            FilterChip(
-                                selected = selected,
+                        Box {
+                            FilledTonalButton(
                                 onClick = {
-                                    onJumpThresholdChange(valMohm)
-                                    thresholdInputText = valMohm.toInt().toString()
+                                    focusManager.clearFocus()
+                                    showPresetMenu = true
                                 },
-                                label = {
-                                    Text(
-                                        text = label,
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        softWrap = false
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text(
+                                    text = "预设",
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showPresetMenu,
+                                onDismissRequest = { showPresetMenu = false }
+                            ) {
+                                thresholdPresets.forEach { (valMohm, label) ->
+                                    val selected = kotlin.math.abs(jumpThresholdMilliohms - valMohm) < 0.001
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = label,
+                                                fontSize = 13.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        trailingIcon = {
+                                            if (selected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "已选中",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            onJumpThresholdChange(valMohm)
+                                            thresholdInputText = valMohm.toInt().toString()
+                                            showPresetMenu = false
+                                        }
                                     )
-                                },
-                                modifier = Modifier.height(28.dp)
-                            )
+                                }
+                            }
                         }
                     }
                 }
@@ -572,7 +719,10 @@ private fun DashboardPage(
             )
             if (savedRecords.isNotEmpty()) {
                 TextButton(
-                    onClick = onClearAll,
+                    onClick = {
+                        focusManager.clearFocus()
+                        onClearAll()
+                    },
                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                     modifier = Modifier.height(24.dp)
                 ) {
@@ -581,7 +731,7 @@ private fun DashboardPage(
             }
         }
 
-        // 紧凑型历史记录列表（节省垂直空间，同屏可展示更多条目）
+        // 紧凑型历史记录列表
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -620,10 +770,22 @@ private fun DashboardPage(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        IconButton(onClick = { onEditNote(record) }, modifier = Modifier.size(28.dp)) {
+                        IconButton(
+                            onClick = {
+                                focusManager.clearFocus()
+                                onEditNote(record)
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
                             Icon(Icons.Default.Edit, contentDescription = "备注", modifier = Modifier.size(15.dp))
                         }
-                        IconButton(onClick = { onDeleteRecord(record.id) }, modifier = Modifier.size(28.dp)) {
+                        IconButton(
+                            onClick = {
+                                focusManager.clearFocus()
+                                onDeleteRecord(record.id)
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
                             Icon(Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(15.dp))
                         }
                     }
@@ -643,12 +805,12 @@ private fun SerialMonitorPage(
     onClearLogs: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val focusManager = LocalFocusManager.current
     var hexInput by remember { mutableStateOf("01 A6 02 8A 8A") }
     var appendChecksum by remember { mutableStateOf(true) }
     var autoScroll by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
-    // 根据当前亮/暗色主题动态适配 HEX 报文监视器配色
     val monitorBgColor = if (isDarkTheme) Color(0xFF14171A) else Color(0xFFF1F5F9)
     val monitorHeaderColor = if (isDarkTheme) Color(0xFF1F2429) else Color(0xFFE2E8F0)
     val monitorTitleColor = if (isDarkTheme) Color(0xFFE0E0E0) else Color(0xFF1E293B)
@@ -657,7 +819,6 @@ private fun SerialMonitorPage(
     val autoScrollToggleColor = if (isDarkTheme) Color(0xFF81C784) else Color(0xFF1B5E20)
     val clearBtnColor = if (isDarkTheme) Color(0xFFE57373) else Color(0xFFC62828)
 
-    // 监听最新一条日志的唯一 ID（而不是 size），满 150 条后依然能持续自动滚屏
     val latestLogId = serialLogs.lastOrNull()?.id
     LaunchedEffect(latestLogId, autoScroll) {
         if (autoScroll && serialLogs.isNotEmpty()) {
@@ -669,7 +830,7 @@ private fun SerialMonitorPage(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 上半部分：内阻仪返回的 16 进制消息监视区（自动适配亮暗色主题）
+        // 上半部分：HEX 报文监视区
         Card(
             colors = CardDefaults.cardColors(containerColor = monitorBgColor),
             shape = RoundedCornerShape(12.dp),
@@ -694,7 +855,10 @@ private fun SerialMonitorPage(
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(
-                            onClick = { autoScroll = !autoScroll },
+                            onClick = {
+                                focusManager.clearFocus()
+                                autoScroll = !autoScroll
+                            },
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                             modifier = Modifier.height(28.dp)
                         ) {
@@ -705,7 +869,10 @@ private fun SerialMonitorPage(
                             )
                         }
                         TextButton(
-                            onClick = onClearLogs,
+                            onClick = {
+                                focusManager.clearFocus()
+                                onClearLogs()
+                            },
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                             modifier = Modifier.height(28.dp)
                         ) {
@@ -752,19 +919,25 @@ private fun SerialMonitorPage(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     OutlinedTextField(
                         value = hexInput,
                         onValueChange = { hexInput = it },
                         label = { Text("发送 HEX 指令", fontSize = 11.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Ascii,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { focusManager.clearFocus() }
+                        ),
                         textStyle = LocalTextStyle.current.copy(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp
                         ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     )
 
                     Row(
@@ -774,11 +947,17 @@ private fun SerialMonitorPage(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { appendChecksum = !appendChecksum }
+                            modifier = Modifier.clickable {
+                                focusManager.clearFocus()
+                                appendChecksum = !appendChecksum
+                            }
                         ) {
                             Checkbox(
                                 checked = appendChecksum,
-                                onCheckedChange = { appendChecksum = it },
+                                onCheckedChange = {
+                                    focusManager.clearFocus()
+                                    appendChecksum = it
+                                },
                                 modifier = Modifier.size(26.dp)
                             )
                             Spacer(Modifier.width(2.dp))
@@ -791,7 +970,10 @@ private fun SerialMonitorPage(
                         }
 
                         Button(
-                            onClick = { onSendHex(hexInput, appendChecksum) },
+                            onClick = {
+                                focusManager.clearFocus()
+                                onSendHex(hexInput, appendChecksum)
+                            },
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
                         ) {
@@ -869,6 +1051,7 @@ private fun AddressSelectorDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit
 ) {
+    val focusManager = LocalFocusManager.current
     var hexText by remember { mutableStateOf(String.format(Locale.US, "%02X", currentAddress)) }
     val quickPresets = listOf(1, 2, 3, 4, 5, 6, 7, 8)
 
@@ -876,7 +1059,12 @@ private fun AddressSelectorDialog(
         onDismissRequest = onDismiss,
         title = { Text("设置目标轮询地址 (HEX)") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.pointerInput(Unit) {
+                    detectTapGestures(onTap = { focusManager.clearFocus() })
+                }
+            ) {
                 Text("常用地址快捷选择：", style = MaterialTheme.typography.labelMedium)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -885,7 +1073,10 @@ private fun AddressSelectorDialog(
                     quickPresets.take(4).forEach { addr ->
                         FilterChip(
                             selected = hexText.uppercase(Locale.US) == String.format(Locale.US, "%02X", addr),
-                            onClick = { hexText = String.format(Locale.US, "%02X", addr) },
+                            onClick = {
+                                focusManager.clearFocus()
+                                hexText = String.format(Locale.US, "%02X", addr)
+                            },
                             label = { Text(String.format(Locale.US, "%02X", addr), fontFamily = FontFamily.Monospace) }
                         )
                     }
@@ -897,7 +1088,10 @@ private fun AddressSelectorDialog(
                     quickPresets.drop(4).forEach { addr ->
                         FilterChip(
                             selected = hexText.uppercase(Locale.US) == String.format(Locale.US, "%02X", addr),
-                            onClick = { hexText = String.format(Locale.US, "%02X", addr) },
+                            onClick = {
+                                focusManager.clearFocus()
+                                hexText = String.format(Locale.US, "%02X", addr)
+                            },
                             label = { Text(String.format(Locale.US, "%02X", addr), fontFamily = FontFamily.Monospace) }
                         )
                     }
@@ -908,6 +1102,13 @@ private fun AddressSelectorDialog(
                     onValueChange = { if (it.length <= 2) hexText = it.uppercase(Locale.US) },
                     label = { Text("自定义十六进制地址 (01 ~ FE)") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Ascii,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
             }

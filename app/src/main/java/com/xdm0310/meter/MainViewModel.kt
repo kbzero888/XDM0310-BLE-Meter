@@ -22,13 +22,7 @@ import kotlin.math.abs
 enum class ThemeMode(val label: String) {
     SYSTEM("跟随系统"),
     LIGHT("亮色主题"),
-    DARK("暗色主题");
-
-    fun next(): ThemeMode = when (this) {
-        SYSTEM -> LIGHT
-        LIGHT -> DARK
-        DARK -> SYSTEM
-    }
+    DARK("暗色主题")
 }
 
 data class SavedRecord(
@@ -56,7 +50,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val bleManager = XdmBleManager(application)
     private val prefs = application.getSharedPreferences("xdm0310_prefs", Context.MODE_PRIVATE)
 
-    // 主题模式（跟随系统 / 亮色 / 暗色）
+    // 主题模式（跟随系统 / 亮色主题 / 暗色主题）
     private val _themeMode = MutableStateFlow(
         ThemeMode.entries.getOrElse(prefs.getInt("theme_mode", 0)) { ThemeMode.SYSTEM }
     )
@@ -100,7 +94,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _savedRecords = MutableStateFlow<List<SavedRecord>>(emptyList())
     val savedRecords: StateFlow<List<SavedRecord>> = _savedRecords.asStateFlow()
 
-    // 串口助手日志列表（仅在串口页面激活时记录，配合 100ms 节流刷新防卡顿）
+    // 串口助手日志列表
     private val _serialLogs = MutableStateFlow<List<SerialLogEntry>>(emptyList())
     val serialLogs: StateFlow<List<SerialLogEntry>> = _serialLogs.asStateFlow()
 
@@ -128,18 +122,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startSerialLogUiSyncLoop()
     }
 
-    fun cycleThemeMode() {
-        val next = _themeMode.value.next()
-        _themeMode.value = next
-        prefs.edit().putInt("theme_mode", next.ordinal).apply()
-        Toast.makeText(getApplication(), "已切换为：${next.label}", Toast.LENGTH_SHORT).show()
+    fun setThemeMode(mode: ThemeMode) {
+        _themeMode.value = mode
+        prefs.edit().putInt("theme_mode", mode.ordinal).apply()
     }
 
     fun togglePage() {
         val nextIsSerial = !_isSerialPage.value
         _isSerialPage.value = nextIsSerial
         if (nextIsSerial) {
-            // 刚切入串口页面时立即同步一次当前列表，避免任何延迟或堆积
             synchronized(serialLogBuffer) {
                 _serialLogs.value = serialLogBuffer.toList()
                 serialLogsDirty = false
@@ -194,9 +185,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * 每 100ms 将内存中的串口日志增量批量同步到 Compose UI，避免高频收发重绘拖垮主线程
-     */
     private fun startSerialLogUiSyncLoop() {
         viewModelScope.launch {
             while (isActive) {
@@ -238,14 +226,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleParsedFrame(reading: MeterReading) {
-        // 仅处理与当前选定目标地址匹配的仪表应答
         if (reading.moduleAddress != _targetAddress.value) return
 
         _currentReading.value = reading
 
         if (!_autoRecordEnabled.value) return
 
-        // 检测到表笔断开（oL 超量程）：结束当前测量会话，下一次有效测量将新增记录
         if (reading.isOverload || reading.resistanceMilliohms.isNaN()) {
             resetMeasurementSession()
             return
@@ -256,16 +242,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val jumpLimit = _jumpThresholdMilliohms.value
 
         if (prevMohm == null) {
-            // 刚接触电池的第一帧有效读数
             previousFrameMilliohms = currentMohm
             consecutiveSameCount = 1
         } else {
             val delta = abs(currentMohm - prevMohm)
             if (delta < jumpLimit) {
-                // 相邻两帧未出现超过阈值的突变 -> 判定为稳定帧，继续累加
                 consecutiveSameCount++
             } else {
-                // 相邻两帧出现巨大差异 -> 判定为不稳定帧，重新计数（但保留同一会话 ID）
                 consecutiveSameCount = 1
             }
             previousFrameMilliohms = currentMohm
@@ -274,7 +257,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val threshold = _stableThreshold.value
         _stableProgress.value = consecutiveSameCount.coerceAtMost(threshold)
 
-        // 一旦达到稳定帧数，在未断开期间持续同步更新当前这一条测量记录（首次则新建，后续稳定帧原地覆盖）
         if (consecutiveSameCount >= threshold) {
             commitSessionReading(reading)
         }
@@ -455,7 +437,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun appendSerialLog(isTx: Boolean, bytes: ByteArray) {
-        // 仅在串口助手页面激活时记录 HEX 报文，防止在仪表盘主页长期挂机时后台堆积卡顿
         if (!_isSerialPage.value) return
 
         logSequence++
