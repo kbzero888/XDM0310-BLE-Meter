@@ -102,7 +102,7 @@ object BleProtocol {
     }
 
     fun hexToBytes(hexInput: String, appendChecksum: Boolean = false): ByteArray? {
-        val cleaned = hexInput.replace("\s+".toRegex(), "").uppercase(Locale.US)
+        val cleaned = hexInput.replace("\\s+".toRegex(), "").uppercase(Locale.US)
         if (cleaned.isEmpty() || cleaned.length % 2 != 0) return null
         if (!cleaned.matches(Regex("^[0-9A-F]+$"))) return null
 

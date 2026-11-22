@@ -218,8 +218,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateRecordNote(id: Long, newNote: String) {
         val updated = _savedRecords.value.map {
-            if (it.id == id) it.copy(note = newNote.replace("	", " ").replace("
-", " ")) else it
+            if (it.id == id) it.copy(note = newNote.replace("\t", " ").replace("\n", " ")) else it
         }
         _savedRecords.value = updated
         persistRecordsToDisk(updated)
@@ -239,9 +238,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun persistRecordsToDisk(records: List<SavedRecord>) {
         viewModelScope.launch {
             try {
-                val content = records.joinToString("
-") {
-                    "${it.id}	${it.timeText}	${it.addressHex}	${it.voltage}	${it.resistance}	${it.note}"
+                val content = records.joinToString("\n") {
+                    "${it.id}\t${it.timeText}\t${it.addressHex}\t${it.voltage}\t${it.resistance}\t${it.note}"
                 }
                 storageFile.writeText(content, Charsets.UTF_8)
             } catch (e: Exception) {
@@ -254,7 +252,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             if (!storageFile.exists()) return
             val list = storageFile.readLines(Charsets.UTF_8).mapNotNull { line ->
-                val parts = line.split("	")
+                val parts = line.split("\t")
                 if (parts.size >= 5) {
                     SavedRecord(
                         id = parts[0].toLongOrNull() ?: System.nanoTime(),
@@ -283,12 +281,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val fileName = "XDM0310_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.csv"
             val csvFile = File(context.cacheDir, fileName)
             val sb = StringBuilder()
-            sb.append("﻿") // UTF-8 BOM 防止 Excel 中文乱码
-            sb.append("测量时间,模块地址,电压,内阻,备注
-")
+            sb.append("\uFEFF") // UTF-8 BOM 防止 Excel 中文乱码
+            sb.append("测量时间,模块地址,电压,内阻,备注\n")
             for (r in records) {
-                sb.append("${r.timeText},0x${r.addressHex},${r.voltage},${r.resistance},"${r.note}"
-")
+                sb.append("${r.timeText},0x${r.addressHex},${r.voltage},${r.resistance},\"${r.note}\"\n")
             }
             csvFile.writeText(sb.toString(), Charsets.UTF_8)
 
