@@ -617,31 +617,51 @@ private fun DashboardPage(
                             softWrap = false
                         )
                         OutlinedTextField(
-                            value = thresholdInputText,
-                            onValueChange = { raw ->
-                                thresholdInputText = raw
-                                raw.toDoubleOrNull()?.let { parsed ->
-                                    if (parsed > 0.0) {
-                                        onJumpThresholdChange(parsed)
-                                    }
-                                }
-                            },
-                            singleLine = true,
-                            suffix = { Text("mΩ", fontSize = 11.sp) },
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Decimal,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = { focusManager.clearFocus() }
-                            ),
-                            textStyle = LocalTextStyle.current.copy(
-                                fontSize = 13.sp,
-                                fontFamily = FontFamily.Monospace
-                            ),
+                            Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            color = MaterialTheme.colorScheme.surface,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp)
+                                .height(34.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            ) {
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = thresholdInputText,
+                                    onValueChange = { raw ->
+                                        thresholdInputText = raw
+                                        raw.toDoubleOrNull()?.let { parsed ->
+                                            if (parsed > 0.0) {
+                                                onJumpThresholdChange(parsed)
+                                            }
+                                        }
+                                    },
+                                    singleLine = true,
+                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Decimal,
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = { focusManager.clearFocus() }
+                                    ),
+                                    textStyle = LocalTextStyle.current.copy(
+                                        fontSize = 13.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "mΩ",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         )
 
                         Box {
